@@ -1,0 +1,308 @@
+---
+title: "Additions to Module0 of Team13"
+author: "Qifei"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+```
+
+
+*This Notebook is used for verified the result from teamwork-13 Module 0*
+
+Thanks for Griffin Sheppard, Rohan Anand, Pippa Lin, Irena Wong, and Yibo Liang finished all parts of analyzing the `background-clean.csv` and `interest-clean.csv`. 
+
+# Raw-Data Processing
+*more to be included*
+**Note:** It's important to mention that the original data is split into two table files, and the content within them is not suitable for analysis. As a result, we need to preliminarily organize the data and format character data to be compatible with analyses, such as correlation matrices.
+
+The data processing R script is saved at `~/scripts/Data_Processing.R`, and the steps for data processing are:
+
+1. Import the `background-clean.csv` and `interest-clean.csv` files.
+2. Merge the two datasets together using the `merged()` command.
+3. Utilize `tidyverse` to encode categorical columns in the dataset: `type`, `lang`, `area`, and `dom.x`.
+4. Use `mutate` to transform variables of `character` and `logical` types in the dataset into `int` based on certain rules.
+5. Export the results as a CSV for subsequent analysis.
+
+## Encoding Process
+In this process, we introduce a function one_hot_encode designed to perform one-hot encoding on a specific column within a dataset, particularly for cases where one row can contain multiple categorical values separated by semicolons.
+
+1. From the `tidyr` package, `rseparate_rows` is used to split multiple categorical values in a single row that are separated by a semicolon (;). Each split value becomes a separate row.
+2. Using `mutate` from the `dplyr` package, we introduce a new column `value` and set its value to 1. This step prepares the data for the subsequent one-hot encoding process, where this value column will serve as the indicator (`1` or `0`).
+3. The `pivot_wider` function from the `tidyr` package is employed to reshape the data. The unique values from the `starts_with` will be used to create new columns, prefixed with the name of the `starts_with` followed by a dot. The newly introduced `value` column will be the source of values for these new columns. If a certain category is not present for a given row, it will be filled with a 0 (`values_fill = 0`).
+4. The `group_by` function from the `dplyr` package is used to group the data by `response.id`. Post grouping, the `summarise` function is utilized to merge the separate rows (originally created by `separate_rows`) back together. The `across` function, paired with `starts_with`, targets the one-hot encoded columns and applies the max function to them. This ensures that if any of the separated rows had the `value` 1 for a category, the summarized row would also have a 1 for that category.
+
+## Transform Data Type
+
+The primary objective here is to convert various categorical representations in the dataset into numerical formats that are suitable for analytical processes. We've used a combination of functions and commands from the `dplyr` package to achieve this.
+
+### Character Conversion:
+
+For columns that are of character type, the `mutate` and `across` functions are used to target character columns. Within those columns, the `case_when` function maps specific string values to corresponding integer values. 
+
+For example, 
+* Common affirmative values like "yes" or "true" are converted to 1, while negatives like "no" or "false" are converted to 0. 
+* Specific codes like "Adv", "Int", "Beg" under the `x.proficiency` are also mapped to 9, 5, and 3 respectively. 
+* Specific columns in updv.num, the system mistakenly recognize options like `6-8`, `3-5` as date format `8-Jun` and `5-Mar`. As a rank of number of class taken `0-2`, `3-5`, `6-8`, and `9+` are mapping to 1, 2, 3, 4 repectively.
+
+This helps standardize the categorical data into a numerical format.
+
+### Logical Conversion:
+
+For columns that are of logical type (TRUE or FALSE), they are straightforward to convert. The `TRUE` value is mapped to 1, and `FALSE` is mapped to 0 using the `as.integer` function.
+
+### Conditional Adjustments:
+
+Based on the value in the `type.both` column, adjustments are made to the `type.lab` and `type.ind` columns. If `type.both` is 1, both `type.lab` and `type.ind` are set to 1.
+
+## Output
+
+You may find the encoded file under `~/data`
+
+
+
+# Digging into Data
+*following the steps and question mentioned in result*
+
+## Class Counting
+
+Using the processed code, we could easily calculate total number of PSTAT class CS class LING class ECON class each respondent have taken.
+
+* `select(., starts_with("PSTAT"))` selects all columns that start with "PSTAT".
+* `rowSums()` then calculates the row-wise sum across these columns.
+
+Similarly, for the other class types, we use the `starts_with()` function to select the appropriate columns and then compute the sum. The results are stored in new columns `num_PSTAT`, `num_CS`, `num_ECON`, and `num_LING` respectively.
+
+```{r}
+root_dir <- rprojroot::find_rstudio_root_file()
+data_dir <- file.path(root_dir, "data")
+setwd(data_dir)
+
+merged_data <-read.csv("processed_data.csv")
+merged_data <- merged_data %>%
+  mutate(
+    num_PSTAT = rowSums(select(., starts_with("PSTAT"))),
+    num_CS = rowSums(select(., starts_with("CS"))),
+    num_ECON = rowSums(select(., starts_with("ECON"))),
+    num_LING = rowSums(select(., starts_with("LING"))),
+    num_Prog = rowSums(merged_data[, c("PSTAT100", "PSTAT115", "PSTAT126", "PSTAT131", "CS9", "CS16", "CS5A.B", "CS130A.B", "LING110", "LING111")])
+  )
+```
+
+Drop the course name we could find the basic information for each respondent
+
+```{r}
+basic_info <- merged_data %>%
+  select(-c("PSTAT100", "PSTAT120A.B", "PSTAT122", "PSTAT126", "PSTAT131", "PSTAT160A.B", "CS9", "CS16", "PSTAT174", "PSTAT175", "PSTAT127", "PSTAT134", "PSTAT115", "CS5A.B", "ECON145", "CS130A.B", "CS165A.B", "LING110", "LING111"))
+```
+
+## Correlation Analysis 
+
+To compute the correlation matrix for the `basic_info` dataframe
+
+```{r}
+library(corrplot)
+cor_matrix <- cor(basic_info, use = "complete.obs")
+```
+
+For Question 1, we focus on the correlation between number of PSTAT classes and other, export the correlation of num_PSTAT with other class.
+
+```{r}
+# Extract the correlation of 'num_PSTAT' with other variables
+cor_with_num_PSTAT <- cor_matrix['num_PSTAT', ]
+cor_with_num_PSTAT <- cor_with_num_PSTAT[cor_with_num_PSTAT != 1]
+sorted_cor <- cor_with_num_PSTAT[order(-abs(cor_with_num_PSTAT))]
+
+# Extract correlations for each category
+area_cor <- sorted_cor[str_detect(names(sorted_cor), "^area\\.")]
+lang_cor <- sorted_cor[str_detect(names(sorted_cor), "^lang\\.")]
+dom_x_cor <- sorted_cor[str_detect(names(sorted_cor), "^dom.x\\.")]
+other_cor <- sorted_cor[!names(sorted_cor) %in% c(names(area_cor), names(lang_cor), names(dom_x_cor))]
+
+# Print the results
+cat("Top correlated variable within area.* with num_PSTAT is:", names(area_cor)[1:3], "with corresponding correlation:", area_cor[1:3], "\n")
+cat("Top correlated variable within lang.* with num_PSTAT is:", names(lang_cor)[1:3], "with corresponding correlation:", lang_cor[1:3], "\n")
+cat("Top correlated variable within dom.x.* with num_PSTAT is:", names(dom_x_cor)[1:3], "with corresponding correlation:", dom_x_cor[1:3], "\n")
+
+cat(names(other_cor)[1:10])
+```
+
+## Answering Question 1
+
+*Question 1*: Does the number of PSTAT classes taken correlate with the student’s comfort and proficiency in Stats?
+
+```{r}
+sorted_cor['stat.comf'];sorted_cor['stat.prof']
+```
+
+There is a weak positive correlation between the number of PSTAT classes taken correlate with the student’s comfort and proficiency in statistic.
+
+
+
+## Answering Question 2
+
+For Question 2, we focus on the correlation between number of Program-correlated classes and other.
+
+```{r}
+# Extract the correlation of 'num_Prog' with other variables
+cor_with_num_Prog <- cor_matrix['num_Prog', ]
+cor_with_num_Prog <- cor_with_num_Prog[cor_with_num_Prog != 1]
+sorted_cor <- cor_with_num_Prog[order(-abs(cor_with_num_Prog))]
+
+# Extract correlations for each category
+area_cor <- sorted_cor[str_detect(names(sorted_cor), "^area\\.")]
+lang_cor <- sorted_cor[str_detect(names(sorted_cor), "^lang\\.")]
+dom_x_cor <- sorted_cor[str_detect(names(sorted_cor), "^dom.x\\.")]
+other_cor <- sorted_cor[!names(sorted_cor) %in% c(names(area_cor), names(lang_cor), names(dom_x_cor))]
+
+# Get the top correlated variable for each category
+top_area <- names(area_cor)[1]
+top_lang <- names(lang_cor)[1]
+top_dom_x <- names(dom_x_cor)[1]
+top_other <- names(other_cor)[1]
+
+# Print the results
+cat("Top correlated variable within area.* with num_PSTAT is:", names(area_cor)[1:3], "with corresponding correlation:", area_cor[1:3], "\n")
+cat("Top correlated variable within lang.* with num_PSTAT is:", names(lang_cor)[1:3], "with corresponding correlation:", lang_cor[1:3], "\n")
+cat("Top correlated variable within dom.x.* with num_PSTAT is:", names(dom_x_cor)[1:3], "with corresponding correlation:", dom_x_cor[1:3], "\n")
+
+cat(names(other_cor)[1:10])
+cat(other_cor[1:10])
+```
+
+```{r}
+sorted_cor['prog.comf'];sorted_cor['prog.prof']
+```
+
+There is a weak positive correlation between the number of Program-orient classes taken correlate with the student’s comfort and proficiency in programming.
+
+*Additions Beyond Result*: Notice that students taken more program-related class is more comfortable using `Python` as their programming code and less likely to use `R`.
+
+## Answering Question 3
+
+To explore if proficiencies (`stat.prof`, `math.prof`, `prog.prof`) are associated with interests in certain topics (`area.*`), following the systematic approach:
+
+### Descriptive Analysis: 
+
+Start by visually examining the distribution of the proficiency columns (`stat.prof`, `math.prof`, `prog.prof`) and the distribution of interests (`area.*`) through histograms or bar plots.
+
+```{r}
+summary(merged_data[c("stat.prof", "math.prof", "prog.prof")])
+summary(select(merged_data, starts_with("area.")))
+```
+
+*Histograms for Proficiencies*
+*The following code is used to solve that cata with 0 frequency will not show in plot*
+
+```{r}
+library(ggplot2)
+
+# Convert stat.prof to a factor with specific levels and labels
+merged_data$stat.prof_factor <- factor(merged_data$stat.prof, 
+                                      levels = c(3, 5, 9), 
+                                      labels = c("Beginner", "Intermediate", "Advanced"))
+
+# Prepare a data frame that ensures all levels have at least one count
+plot_data <- as.data.frame(table(merged_data$stat.prof_factor))
+plot_data$Var1 <- factor(plot_data$Var1, levels = c("Beginner", "Intermediate", "Advanced"))
+
+# Plot using plot_data
+ggplot(plot_data, aes(x = Var1, y = Freq)) + 
+  geom_bar(stat = "identity", aes(fill = Var1)) + 
+  labs(x = "Proficiency Level", y = "Count", fill = "Proficiency Level Stat") +
+  theme_minimal()
+
+# Convert stat.prof to a factor with specific levels and labels
+merged_data$math.prof_factor <- factor(merged_data$math.prof, 
+                                      levels = c(3, 5, 9), 
+                                      labels = c("Beginner", "Intermediate", "Advanced"))
+
+# Prepare a data frame that ensures all levels have at least one count
+plot_data <- as.data.frame(table(merged_data$math.prof_factor))
+plot_data$Var1 <- factor(plot_data$Var1, levels = c("Beginner", "Intermediate", "Advanced"))
+
+# Plot using plot_data
+ggplot(plot_data, aes(x = Var1, y = Freq)) + 
+  geom_bar(stat = "identity", aes(fill = Var1)) + 
+  labs(x = "Proficiency Level", y = "Count", fill = "Proficiency Level Math") +
+  theme_minimal()
+
+# Convert stat.prof to a factor with specific levels and labels
+merged_data$prog.prof_factor <- factor(merged_data$prog.prof, 
+                                      levels = c(3, 5, 9), 
+                                      labels = c("Beginner", "Intermediate", "Advanced"))
+
+# Prepare a data frame that ensures all levels have at least one count
+plot_data <- as.data.frame(table(merged_data$prog.prof_factor))
+plot_data$Var1 <- factor(plot_data$Var1, levels = c("Beginner", "Intermediate", "Advanced"))
+
+# Plot using plot_data
+ggplot(plot_data, aes(x = Var1, y = Freq)) + 
+  geom_bar(stat = "identity", aes(fill = Var1)) + 
+  labs(x = "Proficiency Level", y = "Count", fill = "Proficiency Level Prog") +
+  theme_minimal()
+
+```
+
+*The following code is to achieve same data processing and visualization under the coding merged dataset*
+
+```{r}
+library(tidyverse)
+library(tidyverse)
+
+processed_data <- merged_data %>%
+  pivot_longer(cols = starts_with("area."),
+               names_to = "area",
+               values_to = "interest") %>%
+  filter(interest == 1) %>%
+  group_by(area) %>%
+  summarize(mean_stat.prof = mean(stat.prof, na.rm = TRUE)) %>%
+  arrange(-mean_stat.prof) %>% # sort in descending order
+  mutate(area = factor(area, levels = unique(area)))
+
+# Plot
+ggplot(processed_data, aes(x = area, y = mean_stat.prof)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + # rotate x-axis text
+  labs(x = "Area of Interest", y = "Mean of stat.prof", title = "Mean stat.prof by Area of Interest")
+
+processed_data <- merged_data %>%
+  pivot_longer(cols = starts_with("area."),
+               names_to = "area",
+               values_to = "interest") %>%
+  filter(interest == 1) %>%
+  group_by(area) %>%
+  summarize(mean_math.prof = mean(math.prof, na.rm = TRUE)) %>%
+  arrange(-mean_math.prof) %>% # sort in descending order
+  mutate(area = factor(area, levels = unique(area)))
+
+# Plot
+ggplot(processed_data, aes(x = area, y = mean_math.prof)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + # rotate x-axis text
+  labs(x = "Area of Interest", y = "Mean of math.prof", title = "Mean math.prof by Area of Interest")
+
+processed_data <- merged_data %>%
+  pivot_longer(cols = starts_with("area."),
+               names_to = "area",
+               values_to = "interest") %>%
+  filter(interest == 1) %>%
+  group_by(area) %>%
+  summarize(mean_prog.prof = mean(prog.prof, na.rm = TRUE)) %>%
+  arrange(-mean_prog.prof) %>% # sort in descending order
+  mutate(area = factor(area, levels = unique(area)))
+
+# Plot
+ggplot(processed_data, aes(x = area, y = mean_prog.prof)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + # rotate x-axis text
+  labs(x = "Area of Interest", y = "Mean of prog.prof", title = "Mean prog.prof by Area of Interest")
+```
+
